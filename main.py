@@ -6,6 +6,14 @@ from datetime import datetime
 
 app = Flask(__name__)
 
+# Enable CORS
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
 # Configuration
 NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY', 'your-nvidia-api-key-here')
 NVIDIA_BASE_URL = os.environ.get('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1')
@@ -27,10 +35,15 @@ def map_model(openai_model):
     """Map OpenAI model names to NVIDIA NIM models"""
     return MODEL_MAPPING.get(openai_model, openai_model)
 
-@app.route('/v1/chat/completions', methods=['POST'])
+@app.route('/v1/chat/completions', methods=['POST', 'OPTIONS'])
 def chat_completions():
+    # Handle CORS preflight
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     try:
         data = request.json
+        print(f"Received request: {json.dumps(data, indent=2)}")
         
         # Map the model name
         original_model = data.get('model', 'gpt-3.5-turbo')
@@ -74,34 +87,50 @@ def chat_completions():
 
 def handle_non_streaming(nvidia_payload, headers, original_model):
     """Handle non-streaming requests"""
-    response = requests.post(
-        f'{NVIDIA_BASE_URL}/chat/completions',
-        headers=headers,
-        json=nvidia_payload
-    )
+    print(f"Sending to NVIDIA: {json.dumps(nvidia_payload, indent=2)}")
     
-    if response.status_code != 200:
+    try:
+        response = requests.post(
+            f'{NVIDIA_BASE_URL}/chat/completions',
+            headers=headers,
+            json=nvidia_payload,
+            timeout=60
+        )
+        
+        print(f"NVIDIA response status: {response.status_code}")
+        print(f"NVIDIA response: {response.text[:500]}")
+        
+        if response.status_code != 200:
+            return jsonify({
+                'error': {
+                    'message': response.text,
+                    'type': 'nvidia_api_error',
+                    'code': response.status_code
+                }
+            }), response.status_code
+        
+        nvidia_response = response.json()
+        
+        # Convert NVIDIA response to OpenAI format
+        openai_response = {
+            'id': nvidia_response.get('id', 'chatcmpl-' + str(int(datetime.now().timestamp()))),
+            'object': 'chat.completion',
+            'created': int(datetime.now().timestamp()),
+            'model': original_model,
+            'choices': nvidia_response.get('choices', []),
+            'usage': nvidia_response.get('usage', {})
+        }
+        
+        return jsonify(openai_response)
+    except requests.exceptions.RequestException as e:
+        print(f"Request error: {str(e)}")
         return jsonify({
             'error': {
-                'message': response.text,
-                'type': 'nvidia_api_error',
-                'code': response.status_code
+                'message': f'Failed to connect to NVIDIA API: {str(e)}',
+                'type': 'connection_error',
+                'code': 500
             }
-        }), response.status_code
-    
-    nvidia_response = response.json()
-    
-    # Convert NVIDIA response to OpenAI format
-    openai_response = {
-        'id': nvidia_response.get('id', 'chatcmpl-' + str(int(datetime.now().timestamp()))),
-        'object': 'chat.completion',
-        'created': int(datetime.now().timestamp()),
-        'model': original_model,
-        'choices': nvidia_response.get('choices', []),
-        'usage': nvidia_response.get('usage', {})
-    }
-    
-    return jsonify(openai_response)
+        }), 500
 
 def handle_streaming(nvidia_payload, headers, original_model):
     """Handle streaming requests"""
