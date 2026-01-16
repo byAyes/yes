@@ -16,6 +16,11 @@ MODEL_MAPPING = {
     'gpt-3.5-turbo': 'meta/llama-3.1-8b-instruct',
     'gpt-4': 'meta/llama-3.1-70b-instruct',
     'gpt-4-turbo': 'meta/llama-3.1-405b-instruct',
+    'deepseek-chat': 'deepseek-ai/deepseek-r1',
+    'deepseek-r1': 'deepseek-ai/deepseek-r1',
+    'deepseek-coder': 'deepseek-ai/deepseek-coder-6.7b-instruct',
+    'deepseek-v3.1': 'deepseek-ai/deepseek-v3.1',
+    'deepseek-v3.2': 'deepseek-ai/deepseek-v3.2',
 }
 
 def map_model(openai_model):
