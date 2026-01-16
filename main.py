@@ -226,12 +226,18 @@ def image_generations():
         
         # Prepare NVIDIA NIM request
         nvidia_payload = {
-            'prompt': prompt,
-            'width': width,
-            'height': height,
-            'num_inference_steps': 50,
-            'guidance_scale': 7.5
+            'text_prompts': [{'text': prompt, 'weight': 1}],
+            'cfg_scale': 7.5,
+            'sampler': 'K_EULER_ANCESTRAL',
+            'samples': 1,
+            'steps': 50
         }
+        
+        # Add size parameters
+        if width:
+            nvidia_payload['width'] = width
+        if height:
+            nvidia_payload['height'] = height
         
         headers = {
             'Authorization': f'Bearer {NVIDIA_API_KEY}',
@@ -316,6 +322,7 @@ def home():
         'version': '1.0.0',
         'endpoints': {
             'chat': '/v1/chat/completions',
+            'images': '/v1/images/generations',
             'models': '/v1/models',
             'health': '/health'
         },
@@ -323,12 +330,7 @@ def home():
     })
 
 if __name__ == '__main__':
-    print('Starting NVIDIA NIM to OpenAI API Proxy...')
-    print(f'Using NVIDIA Base URL: {NVIDIA_BASE_URL}')
-    print(f'Running on port: {PORT}')
-    print('Available model mappings:')
-    for openai_model, nvidia_model in MODEL_MAPPING.items():
-        print(f'  {openai_model} -> {nvidia_model}')
+    print('Starting NVIDIA NIM to OpenAI API Proxy...'); print(f'Using NVIDIA Base URL: {NVIDIA_BASE_URL}'); print(f'Running on port: {PORT}'); print('Available chat model mappings:'); [print(f'  {k} -> {v}') for k, v in MODEL_MAPPING.items()]; print('Available image model mappings:'); [print(f'  {k} -> {v}') for k, v in IMAGE_MODEL_MAPPING.items()]
     
     # Run on all interfaces so it's accessible from Android
     app.run(host='0.0.0.0', port=PORT, debug=False)
