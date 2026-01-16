@@ -7,8 +7,9 @@ from datetime import datetime
 app = Flask(__name__)
 
 # Configuration
-NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY', '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')
+NVIDIA_API_KEY = os.environ.get('NVIDIA_API_KEY', 'your-nvidia-api-key-here')
 NVIDIA_BASE_URL = os.environ.get('NVIDIA_BASE_URL', 'https://integrate.api.nvidia.com/v1')
+PORT = int(os.environ.get('PORT', 5000))
 
 # Model mapping (OpenAI model names to NVIDIA NIM models)
 MODEL_MAPPING = {
@@ -148,12 +149,27 @@ def health():
     """Health check endpoint"""
     return jsonify({'status': 'ok'})
 
+@app.route('/', methods=['GET'])
+def home():
+    """Root endpoint with API info"""
+    return jsonify({
+        'name': 'NVIDIA NIM to OpenAI API Proxy',
+        'version': '1.0.0',
+        'endpoints': {
+            'chat': '/v1/chat/completions',
+            'models': '/v1/models',
+            'health': '/health'
+        },
+        'status': 'running'
+    })
+
 if __name__ == '__main__':
     print('Starting NVIDIA NIM to OpenAI API Proxy...')
     print(f'Using NVIDIA Base URL: {NVIDIA_BASE_URL}')
+    print(f'Running on port: {PORT}')
     print('Available model mappings:')
     for openai_model, nvidia_model in MODEL_MAPPING.items():
         print(f'  {openai_model} -> {nvidia_model}')
     
     # Run on all interfaces so it's accessible from Android
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=PORT, debug=False)
