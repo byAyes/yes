@@ -29,6 +29,9 @@ MODEL_MAPPING = {
     'deepseek-coder': 'deepseek-ai/deepseek-coder-6.7b-instruct',
     'deepseek-v3.1': 'deepseek-ai/deepseek-v3.1',
     'deepseek-v3.2': 'deepseek-ai/deepseek-v3.2',
+    'gemma-4': 'google/gemma-4-31b-it',
+    'glm-4.7': 'z-ai/glm4_7',
+    'glm-5': 'z-ai/glm5',
 }
 
 # Image model mapping (OpenAI image models to NVIDIA NIM image models)
