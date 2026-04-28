@@ -45,6 +45,8 @@ IMAGE_MODEL_MAPPING = {
 
 def map_model(openai_model):
     """Map OpenAI model names to NVIDIA NIM models"""
+    # If model exists in mapping, use it; otherwise, allow any model name to pass through
+    # This enables using any NVIDIA NIM model directly without pre-configuration
     return MODEL_MAPPING.get(openai_model, openai_model)
 
 def map_image_model(openai_model):
