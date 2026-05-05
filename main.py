@@ -3,6 +3,8 @@ import requests
 import json
 import os
 from datetime import datetime
+from functools import lru_cache
+from typing import Optional, List, Dict
 
 app = Flask(__name__)
 
@@ -42,11 +44,66 @@ IMAGE_MODEL_MAPPING = {
     'flux-1-schnell': 'black-forest-labs/flux-1-schnell',
 }
 
-def map_model(openai_model):
-    """Map OpenAI model names to NVIDIA NIM models"""
-    # If model exists in mapping, use it; otherwise, allow any model name to pass through
-    # This enables using any NVIDIA NIM model directly without pre-configuration
-    return MODEL_MAPPING.get(openai_model, openai_model)
+# Cache for available NVIDIA models (refreshed every 5 minutes)
+_available_models_cache: Optional[List[str]] = None
+_models_cache_time: Optional[float] = None
+MODELS_CACHE_TTL = 300  # 5 minutes
+
+def get_available_nvidia_models() -> List[str]:
+    """Fetch available models from NVIDIA NIM API with caching"""
+    global _available_models_cache, _models_cache_time
+
+    current_time = datetime.now().timestamp()
+
+    # Return cached models if still valid
+    if _available_models_cache and _models_cache_time and (current_time - _models_cache_time) < MODELS_CACHE_TTL:
+        return _available_models_cache
+
+    try:
+        headers = {
+            'Authorization': f'Bearer {NVIDIA_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+
+        response = requests.get(
+            f'{NVIDIA_BASE_URL}/models',
+            headers=headers,
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            models = [model.get('id', '') for model in data.get('data', [])]
+            _available_models_cache = models
+            _models_cache_time = current_time
+            print(f"Fetched {len(models)} available models from NVIDIA NIM")
+            return models
+        else:
+            print(f"Failed to fetch models: {response.status_code}")
+            return []
+    except Exception as e:
+        print(f"Error fetching available models: {str(e)}")
+        return []
+
+def model_exists_in_nvidia(model_name: str) -> bool:
+    """Check if a model exists in NVIDIA NIM"""
+    available_models = get_available_nvidia_models()
+    return model_name in available_models
+
+def map_model(openai_model: str) -> str:
+    """Map OpenAI model names to NVIDIA NIM models with dynamic discovery"""
+    # If model exists in mapping, use it
+    if openai_model in MODEL_MAPPING:
+        return MODEL_MAPPING[openai_model]
+
+    # If not in mapping, check if it exists in NVIDIA NIM
+    if model_exists_in_nvidia(openai_model):
+        print(f"Model '{openai_model}' found in NVIDIA NIM, using directly")
+        return openai_model
+
+    # Model not found, return as-is (will fail with error from NVIDIA)
+    print(f"Warning: Model '{openai_model}' not found in mapping or NVIDIA NIM")
+    return openai_model
 
 def map_image_model(openai_model):
     """Map OpenAI image model names to NVIDIA NIM image models"""
@@ -180,8 +237,10 @@ def handle_streaming(nvidia_payload, headers, original_model):
 
 @app.route('/v1/models', methods=['GET'])
 def list_models():
-    """List available models in OpenAI format"""
+    """List available models in OpenAI format including dynamic discovery"""
     models = []
+
+    # Add mapped models
     for openai_model, nvidia_model in MODEL_MAPPING.items():
         models.append({
             'id': openai_model,
@@ -189,7 +248,8 @@ def list_models():
             'created': int(datetime.now().timestamp()),
             'owned_by': 'nvidia'
         })
-    
+
+    # Add image models
     for openai_model, nvidia_model in IMAGE_MODEL_MAPPING.items():
         models.append({
             'id': openai_model,
@@ -197,7 +257,19 @@ def list_models():
             'created': int(datetime.now().timestamp()),
             'owned_by': 'nvidia'
         })
-    
+
+    # Add dynamically discovered models from NVIDIA NIM
+    nvidia_models = get_available_nvidia_models()
+    for nvidia_model in nvidia_models:
+        # Only add if not already in mapping
+        if nvidia_model not in MODEL_MAPPING.values():
+            models.append({
+                'id': nvidia_model,
+                'object': 'model',
+                'created': int(datetime.now().timestamp()),
+                'owned_by': 'nvidia'
+            })
+
     return jsonify({
         'object': 'list',
         'data': models
