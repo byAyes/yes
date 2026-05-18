@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Response
 import requests
 import json
 import os
+import time
 from datetime import datetime
 
 app = Flask(__name__)
@@ -51,6 +52,49 @@ def map_model(openai_model):
 def map_image_model(openai_model):
     """Map OpenAI image model names to NVIDIA NIM image models"""
     return IMAGE_MODEL_MAPPING.get(openai_model, openai_model)
+
+# Cache for NVIDIA models list
+_nvidia_models_cache = {
+    'models': None,
+    'timestamp': 0
+}
+MODELS_CACHE_TTL = 300  # 5 minutes
+
+def fetch_nvidia_models():
+    """Fetch available models from NVIDIA NIM API with caching"""
+    global _nvidia_models_cache
+    now = time.time()
+    
+    # Return cached models if still fresh
+    if _nvidia_models_cache['models'] and (now - _nvidia_models_cache['timestamp']) < MODELS_CACHE_TTL:
+        return _nvidia_models_cache['models']
+    
+    try:
+        headers = {
+            'Authorization': f'Bearer {NVIDIA_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        response = requests.get(
+            f'{NVIDIA_BASE_URL}/models',
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            nvidia_models = data.get('data', [])
+            _nvidia_models_cache = {
+                'models': nvidia_models,
+                'timestamp': now
+            }
+            print(f"Fetched {len(nvidia_models)} models from NVIDIA API")
+            return nvidia_models
+        else:
+            print(f"Failed to fetch models from NVIDIA: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"Error fetching models from NVIDIA: {e}")
+        return None
 
 @app.route('/v1/chat/completions', methods=['POST', 'OPTIONS'])
 def chat_completions():
@@ -182,21 +226,59 @@ def handle_streaming(nvidia_payload, headers, original_model):
 def list_models():
     """List available models in OpenAI format"""
     models = []
+    seen_ids = set()
+    now = int(datetime.now().timestamp())
+    
+    # Try to fetch real models from NVIDIA
+    nvidia_models = fetch_nvidia_models()
+    
+    if nvidia_models:
+        for m in nvidia_models:
+            model_id = m.get('id', '')
+            if model_id:
+                seen_ids.add(model_id)
+                models.append({
+                    'id': model_id,
+                    'object': 'model',
+                    'created': m.get('created', now),
+                    'owned_by': m.get('owned_by', 'nvidia')
+                })
+    
+    # Add alias mappings (with passthrough note)
     for openai_model, nvidia_model in MODEL_MAPPING.items():
         models.append({
             'id': openai_model,
             'object': 'model',
-            'created': int(datetime.now().timestamp()),
-            'owned_by': 'nvidia'
+            'created': now,
+            'owned_by': 'nvidia',
+            'aliases_to': nvidia_model
         })
+        # If the target model wasn't in NVIDIA's list, add it too
+        if nvidia_model not in seen_ids:
+            seen_ids.add(nvidia_model)
+            models.append({
+                'id': nvidia_model,
+                'object': 'model',
+                'created': now,
+                'owned_by': 'nvidia'
+            })
     
     for openai_model, nvidia_model in IMAGE_MODEL_MAPPING.items():
         models.append({
             'id': openai_model,
             'object': 'model',
-            'created': int(datetime.now().timestamp()),
-            'owned_by': 'nvidia'
+            'created': now,
+            'owned_by': 'nvidia',
+            'aliases_to': nvidia_model
         })
+        if nvidia_model not in seen_ids:
+            seen_ids.add(nvidia_model)
+            models.append({
+                'id': nvidia_model,
+                'object': 'model',
+                'created': now,
+                'owned_by': 'nvidia'
+            })
     
     return jsonify({
         'object': 'list',
@@ -334,7 +416,23 @@ def home():
     })
 
 if __name__ == '__main__':
-    print('Starting NVIDIA NIM to OpenAI API Proxy...'); print(f'Using NVIDIA Base URL: {NVIDIA_BASE_URL}'); print(f'Running on port: {PORT}'); print('Available chat model mappings:'); [print(f'  {k} -> {v}') for k, v in MODEL_MAPPING.items()]; print('Available image model mappings:'); [print(f'  {k} -> {v}') for k, v in IMAGE_MODEL_MAPPING.items()]
+    print('Starting NVIDIA NIM to OpenAI API Proxy...')
+    print(f'Using NVIDIA Base URL: {NVIDIA_BASE_URL}')
+    print(f'Running on port: {PORT}')
+    print()
+    print('Model passthrough: CUALQUIER modelo NVIDIA NIM se puede usar directamente.')
+    print('  - Usa los aliases de abajo o pasa el nombre exacto del modelo NVIDIA.')
+    print('  - Ejemplo: {"model": "nvidia/llama-3.1-nemotron-70b-instruct"}')
+    print()
+    print('Available chat model aliases:')
+    for k, v in MODEL_MAPPING.items():
+        print(f'  {k} -> {v}')
+    print()
+    print('Available image model aliases:')
+    for k, v in IMAGE_MODEL_MAPPING.items():
+        print(f'  {k} -> {v}')
+    print()
+    print(f'GET /v1/models para ver todos los modelos disponibles en NVIDIA')
     
     # Run on all interfaces so it's accessible from Android
     app.run(host='0.0.0.0', port=PORT, debug=False)
